@@ -179,6 +179,7 @@ export async function updateCustomer(req, res) {
     console.table(rows)
     console.log(user.cpf.toString()===rows[0].cpf)
     
+    //caso cpf do banco for igual ao do req.body ja envia por aqui
     if(user.cpf.toString()===rows[0].cpf){
       await connectionDB.query(
         "UPDATE customers SET name=$1, phone=$2, cpf=$3, birthday=$4 WHERE id=$5",
@@ -197,11 +198,10 @@ export async function updateCustomer(req, res) {
       }
     }
 
-
     await connectionDB.query(
       "UPDATE customers SET name=$1, phone=$2, cpf=$3, birthday=$4 WHERE id=$5",
       [user.name, user.phone, user.cpf, user.birthday, id]
-    );
+    )
     res.sendStatus(200);
 
   } catch (err) {
@@ -257,8 +257,8 @@ export async function createRental(req,res){
     console.log('stock',gamesId.rows[0].stockTotal)
     const idCustomer = await connectionDB.query(`SELECT * FROM customers WHERE id ='${customerId}';`)
     console.log(idCustomer.rows.length)
-
-    if(rows.length+1>gamesId.rows[0].stockTotal){
+    const stockgame = gamesId.rows[0].stockTotal -1
+    if(stockgame < 0){
       console.log('unidades de jogo insuficientes')
       res.sendStatus(400)
       return
@@ -283,6 +283,8 @@ export async function createRental(req,res){
       'INSERT INTO rentals ("customerId","gameId","daysRented","rentDate","originalPrice","returnDate","delayFee") VALUES ($1, $2, $3, $4, $5,$6,$7);',
       [customerId,gameId,daysRented,rentDate,originalPrice,null,null]
     );
+    await connectionDB.query('UPDATE games SET "stockTotal"=$1 WHERE id=$2;',
+    [stockgame, gameId])
     res.sendStatus(201);
   } catch (err) {
     res.status(500).send(err.message);
@@ -295,7 +297,12 @@ export async function finishRental(req,res){
   let delayFee = null
   try{
     const {rows} = await connectionDB.query('SELECT * FROM rentals WHERE "id"=$1;',[id])
+    const stockTotal = await connectionDB.query('SELECT games."stockTotal" FROM games WHERE "id"=$1;',[rows[0].gameId])
+    const updateGameStock = stockTotal.rows[0].stockTotal +1
+    console.log(updateGameStock)
+    console.log(rows[0])
     if(rows.length===0 ||rows[0].returnDate !== null ){
+      console.log('CAI AQUI')
       res.sendStatus(400)
       return
     }
@@ -303,17 +310,21 @@ export async function finishRental(req,res){
     const timeElapsed = Date.now();
     const returnDate = new Date(timeElapsed).toLocaleDateString().split("/")
     const dateRented = rows[0].rentDate.toLocaleDateString().split("/")
-
-    if(returnDate[0]-dateRented[0]>rows[0].daysRented){
-      delayFee = rows[0].originalPrice/rows[0].daysRented/100 * (returnDate[0]-dateRented[0]-rows[0].daysRented)
+    console.log(dateRented[0]+dateRented[1]*30 ,returnDate[0]+returnDate[1]*30 )
+    if(returnDate[0]+returnDate[1]*30 > dateRented[0]+dateRented[1]*30){
+      delayFee = rows[0].originalPrice/rows[0].daysRented/100 *((returnDate[0]+returnDate[1]*30) - (dateRented[0]+dateRented[1]*30)-rows[0].daysRented)
+      console.log('MULTA ',delayFee)
     }
     await connectionDB.query(
       'UPDATE rentals SET "returnDate"=$1,"delayFee"=$2 WHERE id=$3;',
       [returnDate, delayFee, id]
     );
+    await connectionDB.query('UPDATE games SET "stockTotal"=$1 WHERE id=$2;',
+      [updateGameStock, rows[0].gameId])
     res.sendStatus(201);
   }
   catch (err) {
+    console.log('cai no erro')
     res.status(500).send(err.message);
   }
 }
